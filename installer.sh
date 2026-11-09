@@ -76,6 +76,8 @@ MSG_ERROR_LOOP="Error: Failed to setup loop device"
 MSG_AUTO_RUN_FILE_CREATED="autorun.scr file created."
 MSG_AUTO_RUN_FILE_NOT_CREATED="Warn: autorun.scr file create failed"
 MSG_CONFIRM_CONTINUE="Do you want to continue? [y/n]"
+AUTO_MODE=0
+[[ "${AUTO,,}" == "true" ]] && AUTO_MODE=1
 
 
 show_system_info() {
@@ -86,10 +88,15 @@ show_system_info() {
 }
 
 confirm_storage() {
-    # STORAGE=$(lsblk | grep disk | head -1 | awk '{print $1}')
-    STORAGE=$(ls /sys/block | grep -vE '^(zram|loop|ram|sr|fd|dm-)' | head -1)
-    ask_until "$MSG_STORAGE_DEVICE" "$STORAGE"
-    STORAGE=$resp
+    if [[ -z "$STORAGE" ]]; then
+        STORAGE=$(ls /sys/block | grep -vE '^(zram|loop|ram|sr|fd|dm-)' | head -1)
+    fi
+    if [[ "$AUTO_MODE" -eq 1 ]]; then
+        [[ -n "$STORAGE" ]] || { echo "Error: Could not detect a storage device in AUTO mode."; exit 1; }
+    else
+        ask_until "$MSG_STORAGE_DEVICE" "$STORAGE"
+        STORAGE=$resp
+    fi
 }
 confirm_address() {
     ETH=$(ip route show default | grep '^default' | sed -n 's/.* dev \([^\ ]*\) .*/\1/p')
@@ -100,17 +107,24 @@ confirm_address() {
         DNS=$(grep '^nameserver' /etc/resolv.conf | awk '{print $2}' | head -n 1)
     fi
     [ -z "$DNS" ] && DNS="8.8.8.8"
-    ask_until "$MSG_ADDRESS" "$ADDRESS"
-    ADDRESS=$resp
-    ask_until "$MSG_GATEWAY" "$GATEWAY"
-    GATEWAY=$resp
+    if [[ "$AUTO_MODE" -eq 0 ]]; then
+        ask_until "$MSG_ADDRESS" "$ADDRESS"
+        ADDRESS=$resp
+        ask_until "$MSG_GATEWAY" "$GATEWAY"
+        GATEWAY=$resp
+    elif [[ -z "$ETH" || -z "$ADDRESS" || -z "$GATEWAY" ]]; then
+        echo "Error: Could not detect interface, IP address, or gateway in AUTO mode."
+        exit 1
+    fi
     ADDRESS_NETWORK=$(detect_address_network "$ADDRESS" "$GATEWAY") || {
         echo "Error: Could not determine the address network."
         exit 1
     }
     echo "$MSG_NETWORK $ADDRESS_NETWORK"
-    ask_until "$MSG_DNS" "$DNS"
-    DNS=$resp
+    if [[ "$AUTO_MODE" -eq 0 ]]; then
+        ask_until "$MSG_DNS" "$DNS"
+        DNS=$resp
+    fi
 }
 
 ipv4_to_int() {
@@ -200,6 +214,14 @@ select_version() {
     if [[ "$ARCH" != "aarch64" ]]; then
         V6_STABLE=$(http_get "https://upgrade.mikrotik.com/routeros/NEWEST6.stable" | cut -d' ' -f1)
         V6_LTS=$(http_get "https://upgrade.mikrotik.com/routeros/NEWEST6.long-term" | cut -d' ' -f1)
+    fi
+
+    if [[ "$AUTO_MODE" -eq 1 ]]; then
+        VERSION=$V7_STABLE
+        set_version_family "$VERSION" || exit 1
+        image_exists "$VERSION" || { echo "Error: Latest stable image is unavailable in AUTO mode."; exit 1; }
+        echo "$MSG_SELECTED_VERSION $VERSION"
+        return
     fi
 
     while true; do
@@ -334,9 +356,11 @@ create_autorun() {
         PARTITION=$([ "$V7" == 1 ] && echo "p2" || echo "p1")
         if mount "${LOOP}${PARTITION}" "$MNT"; then
             confirm_address
-            RANDOM_ADMIN_PASS=$(head -c 512 /dev/urandom | tr -dc 'A-HJ-KMNP-Za-hj-kmnp-z2-9' | head -c 16)
-            ask_until "$MSG_ADMIN_PASSWORD" "$RANDOM_ADMIN_PASS"
-            RANDOM_ADMIN_PASS=$resp
+            RANDOM_ADMIN_PASS="$(head -c 512 /dev/urandom | tr -dc 'a-z' | head -c 1)$(head -c 512 /dev/urandom | tr -dc '0-9' | head -c 1)$(head -c 512 /dev/urandom | tr -dc 'a-z0-9' | head -c 3)"
+            if [[ "$AUTO_MODE" -eq 0 ]]; then
+                ask_until "$MSG_ADMIN_PASSWORD" "$RANDOM_ADMIN_PASS"
+                RANDOM_ADMIN_PASS=$resp
+            fi
             cat <<EOF > "$MNT/rw/autorun.scr"
 /tool mac-server set allowed-interface-list=none 
 /tool mac-server mac-winbox set allowed-interface-list=none 
@@ -349,7 +373,9 @@ create_autorun() {
 /ip address add address=$ADDRESS network=$ADDRESS_NETWORK interface=[/interface ethernet get [find mac-address=$MAC] name]
 /ip route add gateway=$GATEWAY
 EOF
-            cat "$MNT/rw/autorun.scr"
+            if [[ "$AUTO_MODE" -eq 0 ]]; then
+                cat "$MNT/rw/autorun.scr"
+            fi
             echo "$MSG_AUTO_RUN_FILE_CREATED"
             umount $MNT
             losetup -d "$LOOP"
@@ -368,13 +394,20 @@ EOF
 write_reboot() {
 	confirm_storage
     printf "$MSG_WARNING\n" "$STORAGE"
-    ask_yesno "$MSG_CONFIRM_CONTINUE"
-    if [ $? -ne 0 ]; then
-        echo "$MSG_OPERATION_ABORTED"
-        exit 1
-    fi
+	if [[ "$AUTO_MODE" -eq 0 ]]; then
+	    ask_yesno "$MSG_CONFIRM_CONTINUE"
+	    if [ $? -ne 0 ]; then
+	        echo "$MSG_OPERATION_ABORTED"
+	        exit 1
+	    fi
+	fi
     sync
     dd if=chr.img of=/dev/$STORAGE bs=4M conv=fsync
+    if [[ "$AUTO_MODE" -eq 1 ]]; then
+        echo "RouterOS admin password: $RANDOM_ADMIN_PASS"
+        echo "The server is rebooting in 3 seconds."
+        sleep 3
+    fi
     echo "$MSG_REBOOTING"
     echo 1 > /proc/sys/kernel/sysrq 2>/dev/null || true
     echo b > /proc/sysrq-trigger 2>/dev/null || true
