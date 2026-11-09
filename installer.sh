@@ -356,11 +356,21 @@ create_autorun() {
         PARTITION=$([ "$V7" == 1 ] && echo "p2" || echo "p1")
         if mount "${LOOP}${PARTITION}" "$MNT"; then
             confirm_address
-            RANDOM_ADMIN_PASS="$(head -c 512 /dev/urandom | tr -dc 'a-z' | head -c 1)$(head -c 512 /dev/urandom | tr -dc '0-9' | head -c 1)$(head -c 512 /dev/urandom | tr -dc 'a-z0-9' | head -c 3)"
-            if [[ "$AUTO_MODE" -eq 0 ]]; then
+            if [[ -n "$PASSWORD" ]]; then
+                if [[ "$PASSWORD" == *$'\n'* || "$PASSWORD" == *$'\r'* ]]; then
+                    echo "Error: PASSWORD must not contain line breaks."
+                    exit 1
+                fi
+                RANDOM_ADMIN_PASS=$PASSWORD
+            else
+                RANDOM_ADMIN_PASS="$(head -c 512 /dev/urandom | tr -dc 'a-z' | head -c 1)$(head -c 512 /dev/urandom | tr -dc '0-9' | head -c 1)$(head -c 512 /dev/urandom | tr -dc 'a-z0-9' | head -c 3)"
+            fi
+            if [[ "$AUTO_MODE" -eq 0 && -z "$PASSWORD" ]]; then
                 ask_until "$MSG_ADMIN_PASSWORD" "$RANDOM_ADMIN_PASS"
                 RANDOM_ADMIN_PASS=$resp
             fi
+            ROUTEROS_PASSWORD=${RANDOM_ADMIN_PASS//\\/\\\\}
+            ROUTEROS_PASSWORD=${ROUTEROS_PASSWORD//\"/\\\"}
             cat <<EOF > "$MNT/rw/autorun.scr"
 /tool mac-server set allowed-interface-list=none 
 /tool mac-server mac-winbox set allowed-interface-list=none 
@@ -368,7 +378,7 @@ create_autorun() {
 /ip neighbor discovery-settings set discover-interface-list=none 
 /tool bandwidth-server set enabled=no 
 /ip dns set allow-remote-requests=no
-/user set admin password="$RANDOM_ADMIN_PASS"
+/user set admin password="$ROUTEROS_PASSWORD"
 /ip dns set servers=$DNS
 /ip address add address=$ADDRESS network=$ADDRESS_NETWORK interface=[/interface ethernet get [find mac-address=$MAC] name]
 /ip route add gateway=$GATEWAY
