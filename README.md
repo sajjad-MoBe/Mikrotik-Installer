@@ -23,11 +23,27 @@ This project automates the installation process, making MikroTik deployment fast
 
 ## Installation
 
-Run the following command as root to start the installation:
+Run the following command as root to start the installation with a specific RouterOS version:
 
 ```bash
 VERSION=7.24.2 bash <(curl -fsSL https://raw.githubusercontent.com/sajjad-MoBe/Mikrotik-Installer/refs/heads/main/installer.sh)
 ```
+
+### Environment variables
+
+| Variable | Description |
+| --- | --- |
+| `VERSION` | RouterOS version to install, such as `7.24.2`. If the image is unavailable, interactive mode displays available release versions for selection. |
+| `AUTO` | Set to `true` to run without prompts. The installer uses the detected network settings and first detected eligible disk. If `VERSION` is missing or unavailable, it selects the latest v7 stable release. |
+| `PASSWORD` | Admin password to set on the installed RouterOS system. If omitted, a short random password is generated. In automatic mode, the password is printed immediately before reboot. |
+
+Example of a non-interactive installation with a specified version and password:
+
+```bash
+AUTO=true VERSION=7.24.2 PASSWORD=myPass123 bash <(curl -fsSL https://raw.githubusercontent.com/sajjad-MoBe/Mikrotik-Installer/refs/heads/main/installer.sh)
+```
+
+`AUTO=true` skips the disk confirmation prompt and writes the image to the first detected eligible disk. This erases the selected disk.
 
 ## Disclaimer
 
