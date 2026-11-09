@@ -45,9 +45,9 @@ AUTO=true VERSION=7.24.2 PASSWORD=myPass123 bash <(curl -fsSL https://raw.github
 
 `AUTO=true` skips the disk confirmation prompt and writes the image to the first detected eligible disk. This erases the selected disk.
 
-## Disclaimer
+## 🚨 Disclaimer
 
-This tool may perform disk-related operations during installation. Make sure you have a complete backup of your data before running it.
+**Warning: This tool erases the selected disk during installation. Make sure you have a complete backup before running it.**
 
 Use this tool at your own risk.
 
